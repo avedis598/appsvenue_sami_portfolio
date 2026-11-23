@@ -1,18 +1,94 @@
 rules_version = '2';
+
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// This security rules file assumes the following data structures:
+//
+// Collection: clients
+// Document ID: {clientId} (auto-generated ID)
+// Fields:
+//   - name: string (required, trimmed length 1..200 chars) - The display name of the trusted client partner
+//   - logoUrl: string (required, HTTPS URL starting with "https://", length 9..2048 chars) - The URL of the client's logo
+//
+// Access Control:
+//   - Read (get, list): Publicly readable for rendering client logos on the portfolio landing page (contains no PII).
+//   - Write (create, update, delete): Restricted strictly to the verified bootstrap admin email.
+//   - All other collections/paths: Denied by default.
+//
+// ===============================================================
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper functions
-    function isSignedIn() { return request.auth != null; }
-    function isAdmin() { return isSignedIn() && request.auth.token.email == "avedisinfosys@gmail.com"; } // Allowing the user's email
 
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    // Check if the user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Check if the user is the verified portfolio administrator
+    function isAdmin() {
+      return isAuthenticated() &&
+        request.auth.token.email == "avedisinfosys@gmail.com" &&
+        request.auth.token.email_verified == true;
+    }
+
+    // Validate required fields exist on incoming document data
+    function hasRequiredFields(data, fields) {
+      return data.keys().hasAll(fields);
+    }
+
+    // Validate that incoming document data contains only allowed fields
+    function hasOnlyAllowedFields(data, fields) {
+      return data.keys().hasOnly(fields);
+    }
+
+    // Validate string type, non-whitespace content, and character length bounds
+    function isValidNonEmptyString(val, maxLen) {
+      return val is string &&
+        val.trim().size() >= 1 &&
+        val.size() <= maxLen;
+    }
+
+    // Validate HTTPS URL format and length bounds (blocks javascript:, data:, http://)
+    function isValidHttpsUrl(url) {
+      return url is string &&
+        url.size() >= 9 &&
+        url.size() <= 2048 &&
+        url.matches("^https://[^\\s]+$");
+    }
+
+    // ===============================================================
+    // Domain Validators (Applied on both create and update)
+    // ===============================================================
+
+    function isValidClient(data) {
+      return hasRequiredFields(data, ['name', 'logoUrl']) &&
+        hasOnlyAllowedFields(data, ['name', 'logoUrl']) &&
+        isValidNonEmptyString(data.name, 200) &&
+        isValidHttpsUrl(data.logoUrl);
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    // Default deny for all paths not explicitly matched below
     match /{document=**} {
       allow read, write: if false;
     }
 
+    // Trusted client logos displayed publicly on the portfolio landing page
     match /clients/{clientId} {
-      allow list: if true; // Publicly readable
-      allow get: if true;
-      allow create, update, delete: if isAdmin();
+      allow read: if true;
+      allow create: if isAdmin() && isValidClient(request.resource.data);
+      allow update: if isAdmin() && isValidClient(request.resource.data);
+      allow delete: if isAdmin();
     }
   }
 }

@@ -6,6 +6,9 @@
     "database": "ai-studio-5856b1a6-fb52-4fa6-9459-2985c03ae67b",
     "location": "asia-southeast1"
   },
+  "storage": {
+    "rules": "storage.rules"
+  },
   "hosting": {
     "public": "dist",
     "ignore": [
